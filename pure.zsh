@@ -240,6 +240,29 @@ prompt_pure_async_git_aliases() {
 
 	print -- ${(j:|:)pullalias}  # join on pipe (for use in regex).
 }
+prompt_pure_async_hg_aliases() {
+	setopt localoptions noshwordsplit
+	local dir=$1
+	local -a hgalias pullalias
+
+	# we enter repo to get local aliases as well.
+	builtin cd -q $dir
+
+	# list all aliases and split on newline.
+	hgalias=(${(@f)"$(command hg config | grep "^alias\.")"})
+	for line in $hgalias; do
+		parts=(${(@)=line})           # split line on spaces
+		aliasname=${parts[1]#alias.}  # grab the name (alias.[name])
+		shift parts                   # remove aliasname
+
+		# check alias for pull or fetch (must be exact match).
+		if [[ $parts =~ ^(.*\ )?(pull)(\ .*)?$ ]]; then
+			pullalias+=($aliasname)
+		fi
+	done
+
+	print -- ${(j:|:)pullalias}  # join on pipe (for use in regex).
+}
 
 # fastest possible way to check if repo is dirty
 prompt_pure_async_git_dirty() {
@@ -253,6 +276,21 @@ prompt_pure_async_git_dirty() {
 		command git diff --no-ext-diff --quiet --exit-code
 	else
 		test -z "$(command git status --porcelain --ignore-submodules -unormal)"
+	fi
+
+	return $?
+}
+prompt_pure_async_hg_dirty() {
+	setopt localoptions noshwordsplit
+	local untracked_dirty=$1 dir=$2
+
+	# use cd -q to avoid side effects of changing directory, e.g. chpwd hooks
+	builtin cd -q $dir
+
+	if [[ $untracked_dirty = 0 ]]; then
+		test -z "$(command hg status -mard)"
+	else
+		test -z "$(command hg status)"
 	fi
 
 	return $?
@@ -291,10 +329,11 @@ prompt_pure_async_tasks() {
 	}
 
 	# store working_tree without the "x" prefix
-	local working_tree="${vcs_info_msg_1_#x}"
+	local git_working_tree="${vcs_info_msg_1_#x}"
+	local hg_working_tree="${vcs_info_msg_1_#y}"
 
 	# check if the working tree changed (prompt_pure_current_working_tree is prefixed by "x")
-	if [[ ${prompt_pure_current_working_tree#x} != $working_tree ]]; then
+	if [[ ${prompt_pure_current_working_tree#x} != $git_working_tree ]]; then
 		# stop any running async jobs
 		async_flush_jobs "prompt_pure"
 
@@ -305,34 +344,50 @@ prompt_pure_async_tasks() {
 		prompt_pure_git_arrows=
 
 		# set the new working tree and prefix with "x" to prevent the creation of a named path by AUTO_NAME_DIRS
-		prompt_pure_current_working_tree="x${working_tree}"
+		prompt_pure_current_working_tree="x${git_working_tree}"
+	fi
+
+	if [[ ${prompt_pure_current_working_tree#y} != $hg_working_tree ]]; then
+		async_flush_jobs "prompt_pure"
+
+		unset prompt_pure_hg_dirty
+		unset prompt_pure_hg_last_dirty_check_timestamp
+		unset prompt_pure_hg_fetch_pattern
+		prompt_pure_hg_arrows=
+
+		prompt_pure_current_working_tree="y${hg_working_tree}"
 	fi
 
 	# only perform tasks inside git working tree
-	[[ -n $working_tree ]] || return
+	if [[ -n $git_working_tree ]]; then
 
-	if [[ -z $prompt_pure_git_fetch_pattern ]]; then
-		# we set the pattern here to avoid redoing the pattern check until the
-		# working three has changed. pull and fetch are always valid patterns.
-		prompt_pure_git_fetch_pattern="pull|fetch"
-		async_job "prompt_pure" prompt_pure_async_git_aliases $working_tree
+		if [[ -z $prompt_pure_git_fetch_pattern ]]; then
+			# we set the pattern here to avoid redoing the pattern check until the
+			# working three has changed. pull and fetch are always valid patterns.
+			prompt_pure_git_fetch_pattern="pull|fetch"
+			async_job "prompt_pure" prompt_pure_async_git_aliases $git_working_tree
+		fi
+
+		async_job "prompt_pure" prompt_pure_async_git_arrows $git_working_tree
+
+		# do not preform git fetch if it is disabled or working_tree == HOME
+		if (( ${PURE_GIT_PULL:-1} )) && [[ $git_working_tree != $HOME ]]; then
+			# tell worker to do a git fetch
+			async_job "prompt_pure" prompt_pure_async_git_fetch $git_working_tree
+		fi
+
+		# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
+		integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_git_last_dirty_check_timestamp:-0} ))
+		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
+			unset prompt_pure_git_last_dirty_check_timestamp
+			# check check if there is anything to pull
+			async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $git_working_tree
+		fi
 	fi
 
-	async_job "prompt_pure" prompt_pure_async_git_arrows $working_tree
-
-	# do not preform git fetch if it is disabled or working_tree == HOME
-	if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
-		# tell worker to do a git fetch
-		async_job "prompt_pure" prompt_pure_async_git_fetch $working_tree
-	fi
-
-	# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
-	integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_git_last_dirty_check_timestamp:-0} ))
-	if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
-		unset prompt_pure_git_last_dirty_check_timestamp
-		# check check if there is anything to pull
-		async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $working_tree
-	fi
+#	if [[ -n ${hg_working_tree#y} ]]; then
+#		echo $git_working_tree $hg_working_tree
+#	fi
 }
 
 prompt_pure_check_git_arrows() {
@@ -409,14 +464,16 @@ prompt_pure_setup() {
 	add-zsh-hook precmd prompt_pure_precmd
 	add-zsh-hook preexec prompt_pure_preexec
 
-	zstyle ':vcs_info:*' enable git
+	zstyle ':vcs_info:*' enable git hg
 	zstyle ':vcs_info:*' use-simple true
 	# only export two msg variables from vcs_info
 	zstyle ':vcs_info:*' max-exports 2
 	# vcs_info_msg_0_ = ' %b' (for branch)
 	# vcs_info_msg_1_ = 'x%R' git top level (%R), x-prefix prevents creation of a named path (AUTO_NAME_DIRS)
 	zstyle ':vcs_info:git*' formats ' %b' 'x%R'
+	zstyle ':vcs_info:hg*' formats ' %b' 'y%R'
 	zstyle ':vcs_info:git*' actionformats ' %b|%a' 'x%R'
+	zstyle ':vcs_info:hg*' actionformats ' %b|%a' 'y%R'
 
 	# if the user has not registered a custom zle widget for clear-screen,
 	# override the builtin one so that the preprompt is displayed correctly when
