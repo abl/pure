@@ -328,12 +328,8 @@ prompt_pure_async_tasks() {
 		prompt_pure_async_init=1
 	}
 
-	# store working_tree without the "x" prefix
-	local git_working_tree="${vcs_info_msg_1_#x}"
-	local hg_working_tree="${vcs_info_msg_1_#y}"
-
 	# check if the working tree changed (prompt_pure_current_working_tree is prefixed by "x")
-	if [[ ${prompt_pure_current_working_tree#x} != $git_working_tree ]]; then
+	if [[ $prompt_pure_current_working_tree != $vcs_info_msg_1_ ]]; then
 		# stop any running async jobs
 		async_flush_jobs "prompt_pure"
 
@@ -344,36 +340,26 @@ prompt_pure_async_tasks() {
 		prompt_pure_git_arrows=
 
 		# set the new working tree and prefix with "x" to prevent the creation of a named path by AUTO_NAME_DIRS
-		prompt_pure_current_working_tree="x${git_working_tree}"
-	fi
-
-	if [[ ${prompt_pure_current_working_tree#y} != $hg_working_tree ]]; then
-		async_flush_jobs "prompt_pure"
-
-		unset prompt_pure_hg_dirty
-		unset prompt_pure_hg_last_dirty_check_timestamp
-		unset prompt_pure_hg_fetch_pattern
-		prompt_pure_hg_arrows=
-
-		prompt_pure_current_working_tree="y${hg_working_tree}"
+		prompt_pure_current_working_tree=$vcs_info_msg_1_
 	fi
 
 	# only perform tasks inside git working tree
-	if [[ -n $git_working_tree ]]; then
+	if [[ $vcs_info_msg_1_ == x* ]]; then
+		working_tree="${vcs_info_msg_1_#x}"
 
 		if [[ -z $prompt_pure_git_fetch_pattern ]]; then
 			# we set the pattern here to avoid redoing the pattern check until the
 			# working three has changed. pull and fetch are always valid patterns.
 			prompt_pure_git_fetch_pattern="pull|fetch"
-			async_job "prompt_pure" prompt_pure_async_git_aliases $git_working_tree
+			async_job "prompt_pure" prompt_pure_async_git_aliases $working_tree
 		fi
 
-		async_job "prompt_pure" prompt_pure_async_git_arrows $git_working_tree
+		async_job "prompt_pure" prompt_pure_async_git_arrows $working_tree
 
 		# do not preform git fetch if it is disabled or working_tree == HOME
-		if (( ${PURE_GIT_PULL:-1} )) && [[ $git_working_tree != $HOME ]]; then
+		if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
 			# tell worker to do a git fetch
-			async_job "prompt_pure" prompt_pure_async_git_fetch $git_working_tree
+			async_job "prompt_pure" prompt_pure_async_git_fetch $working_tree
 		fi
 
 		# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
@@ -381,13 +367,20 @@ prompt_pure_async_tasks() {
 		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
 			unset prompt_pure_git_last_dirty_check_timestamp
 			# check check if there is anything to pull
-			async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $git_working_tree
+			async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $working_tree
 		fi
 	fi
 
-#	if [[ -n ${hg_working_tree#y} ]]; then
-#		echo $git_working_tree $hg_working_tree
-#	fi
+	if [[ "$vcs_info_msg_1_" == y* ]]; then
+		working_tree="${vcs_info_msg_1_#y}"
+
+		integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_hg_last_dirty_check_timestamp:-0} ))
+		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
+			unset prompt_pure_hg_last_dirty_check_timestamp
+			# check check if there is anything to pull
+			async_job "prompt_pure" prompt_pure_async_hg_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $working_tree
+		fi
+	fi
 }
 
 prompt_pure_check_git_arrows() {
@@ -412,7 +405,7 @@ prompt_pure_async_callback() {
 				prompt_pure_git_fetch_pattern+="|$output"
 			fi
 			;;
-		prompt_pure_async_git_dirty)
+		prompt_pure_async_git_dirty|prompt_pure_async_hg_dirty)
 			local prev_dirty=$prompt_pure_git_dirty
 			if (( code == 0 )); then
 				prompt_pure_git_dirty=
