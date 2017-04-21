@@ -312,6 +312,17 @@ prompt_pure_async_git_fetch() {
 	prompt_pure_async_git_arrows $1
 }
 
+prompt_pure_async_hg_incoming() {
+	setopt localoptions noshwordsplit
+	# use cd -q to avoid side effects of changing directory, e.g. chpwd hooks
+	builtin cd -q $1
+
+	# check if there any incoming changesets
+	test -z "$(command hg incoming -Tx -l1 -q)"
+
+	return $?
+}
+
 prompt_pure_async_git_arrows() {
 	setopt localoptions noshwordsplit
 	builtin cd -q $1
@@ -328,8 +339,11 @@ prompt_pure_async_tasks() {
 		prompt_pure_async_init=1
 	}
 
+	# store working_tree without the "x" prefix
+	local working_tree="${vcs_info_msg_1_#x}"
+
 	# check if the working tree changed (prompt_pure_current_working_tree is prefixed by "x")
-	if [[ $prompt_pure_current_working_tree != $vcs_info_msg_1_ ]]; then
+	if [[ ${prompt_pure_current_working_tree#x} != $working_tree ]]; then
 		# stop any running async jobs
 		async_flush_jobs "prompt_pure"
 
@@ -340,13 +354,13 @@ prompt_pure_async_tasks() {
 		prompt_pure_git_arrows=
 
 		# set the new working tree and prefix with "x" to prevent the creation of a named path by AUTO_NAME_DIRS
-		prompt_pure_current_working_tree=$vcs_info_msg_1_
+		prompt_pure_current_working_tree="x${working_tree}"
 	fi
 
-	# only perform tasks inside git working tree
-	if [[ $vcs_info_msg_1_ == x* ]]; then
-		working_tree="${vcs_info_msg_1_#x}"
+	# only perform tasks inside vcs working tree
+	[[ -n $working_tree ]] || return
 
+	if [[ "$vcs_info_msg_2_" == "git" ]]; then
 		if [[ -z $prompt_pure_git_fetch_pattern ]]; then
 			# we set the pattern here to avoid redoing the pattern check until the
 			# working three has changed. pull and fetch are always valid patterns.
@@ -371,14 +385,19 @@ prompt_pure_async_tasks() {
 		fi
 	fi
 
-	if [[ "$vcs_info_msg_1_" == y* ]]; then
-		working_tree="${vcs_info_msg_1_#y}"
+	if [[ "$vcs_info_msg_2_" == "hg" ]]; then
 
+		# do not preform hg incoming if it is disabled or working_tree == HOME
+		if (( ${PURE_HG_INCOMING:-1} )) && [[ $working_tree != $HOME ]]; then
+			async_job "prompt_pure" prompt_pure_async_hg_incoming $working_tree
+		fi
+
+		# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
 		integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_hg_last_dirty_check_timestamp:-0} ))
 		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
 			unset prompt_pure_hg_last_dirty_check_timestamp
 			# check check if there is anything to pull
-			async_job "prompt_pure" prompt_pure_async_hg_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $working_tree
+			async_job "prompt_pure" prompt_pure_async_hg_dirty ${PURE_HG_UNTRACKED_DIRTY:-1} $working_tree
 		fi
 	fi
 }
@@ -420,6 +439,16 @@ prompt_pure_async_callback() {
 			# variable. Thus, only upon next rendering of the preprompt will the result appear in a different color.
 			(( $exec_time > 2 )) && prompt_pure_git_last_dirty_check_timestamp=$EPOCHSECONDS
 			;;
+		prompt_pure_async_hg_incoming)
+			local prev_arrows=$prompt_pure_git_arrows
+			if (( code == 0 )); then
+				prompt_pure_git_arrows=
+			else
+				prompt_pure_git_arrows=" ${PURE_HG_DOWN_ARROW:-⇣}"
+			fi
+
+			[[ $prev_arrows != $prompt_pure_git_arrows ]] && prompt_pure_preprompt_render
+			;;
 		prompt_pure_async_git_fetch|prompt_pure_async_git_arrows)
 			# prompt_pure_async_git_fetch executes prompt_pure_async_git_arrows
 			# after a successful fetch.
@@ -460,13 +489,11 @@ prompt_pure_setup() {
 	zstyle ':vcs_info:*' enable git hg
 	zstyle ':vcs_info:*' use-simple true
 	# only export two msg variables from vcs_info
-	zstyle ':vcs_info:*' max-exports 2
+	zstyle ':vcs_info:*' max-exports 3
 	# vcs_info_msg_0_ = ' %b' (for branch)
 	# vcs_info_msg_1_ = 'x%R' git top level (%R), x-prefix prevents creation of a named path (AUTO_NAME_DIRS)
-	zstyle ':vcs_info:git*' formats ' %b' 'x%R'
-	zstyle ':vcs_info:hg*' formats ' %b' 'y%R'
-	zstyle ':vcs_info:git*' actionformats ' %b|%a' 'x%R'
-	zstyle ':vcs_info:hg*' actionformats ' %b|%a' 'y%R'
+	zstyle ':vcs_info:(git|hg):*' formats ' %b' 'x%R' '%s'
+	zstyle ':vcs_info:(git|hg):*' actionformats ' %b|%a' 'x%R' '%s'
 
 	# if the user has not registered a custom zle widget for clear-screen,
 	# override the builtin one so that the preprompt is displayed correctly when
