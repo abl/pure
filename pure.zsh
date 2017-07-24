@@ -173,7 +173,7 @@ prompt_pure_precmd() {
 	# shows the full path in the title
 	prompt_pure_set_title 'expand-prompt' '%~'
 
-	# preform async git dirty check and fetch
+	# perform async git dirty check and fetch
 	prompt_pure_async_tasks
 
 	# store name of virtualenv in psvar if activated
@@ -370,7 +370,7 @@ prompt_pure_async_refresh() {
 
 		async_job "prompt_pure" prompt_pure_async_git_arrows $PWD
 
-		# do not preform git fetch if it is disabled or working_tree == HOME
+		# do not perform git fetch if it is disabled or working_tree == HOME
 		if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
 			# tell worker to do a git fetch
 			async_job "prompt_pure" prompt_pure_async_git_fetch $PWD
@@ -387,7 +387,7 @@ prompt_pure_async_refresh() {
 
 	if [[ "$vcs_info_msg_2_" == "hg" ]]; then
 
-		# do not preform hg incoming if it is disabled or working_tree == HOME
+		# do not perform hg incoming if it is disabled or working_tree == HOME
 		if (( ${PURE_HG_INCOMING:-1} )) && [[ $working_tree != $HOME ]]; then
 			async_job "prompt_pure" prompt_pure_async_hg_incoming $working_tree
 		fi
