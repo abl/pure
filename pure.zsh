@@ -357,49 +357,61 @@ prompt_pure_async_tasks() {
 	prompt_pure_async_refresh
 }
 
+prompt_pure_async_refresh_git() {
+	setopt localoptions noshwordsplit
+
+	if [[ -z $prompt_pure_git_fetch_pattern ]]; then
+		# we set the pattern here to avoid redoing the pattern check until the
+		# working three has changed. pull and fetch are always valid patterns.
+		prompt_pure_git_fetch_pattern="pull|fetch"
+		async_job "prompt_pure" prompt_pure_async_git_aliases $working_tree
+	fi
+
+	async_job "prompt_pure" prompt_pure_async_git_arrows $PWD
+
+	# do not perform git fetch if it is disabled or working_tree == HOME
+	if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
+		# tell worker to do a git fetch
+		async_job "prompt_pure" prompt_pure_async_git_fetch $PWD
+	fi
+
+	# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
+	integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_git_last_dirty_check_timestamp:-0} ))
+	if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
+		unset prompt_pure_git_last_dirty_check_timestamp
+		# check check if there is anything to pull
+		async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $PWD
+	fi
+}
+
+prompt_pure_async_refresh_hg() {
+	setopt localoptions noshwordsplit
+
+	# do not perform hg incoming if it is disabled or working_tree == HOME
+	if (( ${PURE_HG_INCOMING:-1} )) && [[ $working_tree != $HOME ]]; then
+		async_job "prompt_pure" prompt_pure_async_hg_incoming $working_tree
+	fi
+
+	# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
+	integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_hg_last_dirty_check_timestamp:-0} ))
+	if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
+		unset prompt_pure_hg_last_dirty_check_timestamp
+		# check check if there is anything to pull
+		async_job "prompt_pure" prompt_pure_async_hg_dirty ${PURE_HG_UNTRACKED_DIRTY:-1} $working_tree
+	fi
+}
+
 prompt_pure_async_refresh() {
 	setopt localoptions noshwordsplit
 
-	if [[ "$vcs_info_msg_2_" == "git" ]]; then
-		if [[ -z $prompt_pure_git_fetch_pattern ]]; then
-			# we set the pattern here to avoid redoing the pattern check until the
-			# working three has changed. pull and fetch are always valid patterns.
-			prompt_pure_git_fetch_pattern="pull|fetch"
-			async_job "prompt_pure" prompt_pure_async_git_aliases $working_tree
-		fi
-
-		async_job "prompt_pure" prompt_pure_async_git_arrows $PWD
-
-		# do not perform git fetch if it is disabled or working_tree == HOME
-		if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
-			# tell worker to do a git fetch
-			async_job "prompt_pure" prompt_pure_async_git_fetch $PWD
-		fi
-
-		# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
-		integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_git_last_dirty_check_timestamp:-0} ))
-		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
-			unset prompt_pure_git_last_dirty_check_timestamp
-			# check check if there is anything to pull
-			async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $PWD
-		fi
-	fi
-
-	if [[ "$vcs_info_msg_2_" == "hg" ]]; then
-
-		# do not perform hg incoming if it is disabled or working_tree == HOME
-		if (( ${PURE_HG_INCOMING:-1} )) && [[ $working_tree != $HOME ]]; then
-			async_job "prompt_pure" prompt_pure_async_hg_incoming $working_tree
-		fi
-
-		# if dirty checking is sufficiently fast, tell worker to check it again, or wait for timeout
-		integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_hg_last_dirty_check_timestamp:-0} ))
-		if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
-			unset prompt_pure_hg_last_dirty_check_timestamp
-			# check check if there is anything to pull
-			async_job "prompt_pure" prompt_pure_async_hg_dirty ${PURE_HG_UNTRACKED_DIRTY:-1} $working_tree
-		fi
-	fi
+	case "$vcs_info_msg_2_" in
+		git)
+			prompt_pure_async_refresh_git
+			;;
+		hg)
+			prompt_pure_async_refresh_hg
+			;;
+	esac
 }
 
 prompt_pure_check_git_arrows() {
