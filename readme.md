@@ -99,7 +99,7 @@ Set `PURE_GIT_UNTRACKED_DIRTY=0` or `PURE_HG_UNTRACKED_DIRTY=0` to not include u
 
 ### `PURE_GIT_DELAY_DIRTY_CHECK`
 
-Time in seconds to delay git dirty checking for large repositories (git status takes > 2 seconds). The check is performed asynchronously, this is to save CPU. Defaults to `1800` seconds.
+Time in seconds to delay git dirty checking for large repositories (git status takes > 5 seconds). The check is performed asynchronously, this is to save CPU. Defaults to `1800` seconds.
 
 ### `PURE_PROMPT_SYMBOL`
 
@@ -141,20 +141,14 @@ To have commands colorized as seen in the screenshot, install [zsh-syntax-highli
 
 ### [oh-my-zsh](https://github.com/robbyrussell/oh-my-zsh)
 
-1. Symlink (or copy) `pure.zsh` to `~/.oh-my-zsh/custom/pure.zsh-theme`.
-2. Symlink (or copy) `async.zsh` to `~/.oh-my-zsh/custom/async.zsh`.
-3. Set `ZSH_THEME="pure"` in your `.zshrc` file.
-
-Or skip the `oh-my-zsh` integration above and simply:
-
 1. Set `ZSH_THEME=""` in your `.zshrc` to disable oh-my-zsh themes.
 2. Follow the Pure [Install](#install) instructions.
 
-### [prezto](https://github.com/zsh-users/prezto)
+### [prezto](https://github.com/sorin-ionescu/prezto)
 
 Pure is bundled with Prezto. No need to install it.
 
-Set `zstyle ':prezto:module:prompt' theme 'pure'` in `~/.zpreztorc`.
+Add `prompt pure` to your `~/.zpreztorc`.
 
 ### [zim](https://github.com/Eriner/zim)
 
@@ -190,12 +184,6 @@ zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
 ```
 
 ## FAQ
-
-### My preprompt is missing when I clear the screen with Ctrl+L
-
-Pure doesn't register its custom *clear-screen* widget if it has been previously modified. If you haven't registered your own zle widget with `zle -N clear-screen custom-clear-screen` it might have been done by third-party modules. For example `zsh-syntax-highlighting` and `zsh-history-substring-search` are known to do this and they should for that reason be **the very last thing** in your `.zshrc` (as pointed out in their documentation).
-
-To find out the culprit that is overriding your *clear-screen* widget, you can run the following command: `zle -l | grep clear-screen`.
 
 ### I am stuck in a shell loop in my terminal that ask me to authenticate. What should I do ?
 
