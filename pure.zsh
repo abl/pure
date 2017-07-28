@@ -549,8 +549,8 @@ prompt_pure_setup() {
 	zstyle ':vcs_info:*' max-exports 3
 	# vcs_info_msg_0_ = ' %b' (for branch)
 	# vcs_info_msg_1_ = 'x%R' git top level (%R), x-prefix prevents creation of a named path (AUTO_NAME_DIRS)
-	zstyle ':vcs_info:(git|hg):*' formats ' %b' 'x%R' '%s'
-	zstyle ':vcs_info:(git|hg):*' actionformats ' %b|%a' 'x%R' '%s'
+	zstyle ':vcs_info:(git|hg):*' formats '%b' 'x%R' '%s'
+	zstyle ':vcs_info:(git|hg):*' actionformats '%b|%a' 'x%R' '%s'
 
 	# if the user has not registered a custom zle widget for clear-screen,
 	# override the builtin one so that the preprompt is displayed correctly when
