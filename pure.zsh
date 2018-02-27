@@ -113,13 +113,21 @@ prompt_pure_preprompt_render() {
 
 	# Add git branch and dirty status info.
 	typeset -gA prompt_pure_vcs_info
-	if [[ -n $prompt_pure_vcs_info[branch] ]]; then
-		preprompt_parts+=("%F{$git_color}"'${prompt_pure_vcs_info[branch]}${prompt_pure_git_dirty}%f')
-	fi
-	# Git pull/push arrows.
-	if [[ -n $prompt_pure_git_arrows ]]; then
-		preprompt_parts+=('%F{cyan}${prompt_pure_git_arrows}%f')
-	fi
+
+	case $prompt_pure_vcs_info[vcs] in
+		hg)
+			[[ -n $PURE_HG_PROMPT_CMD ]] && preprompt_parts+=("%F{$git_color}☿"'$(${PURE_HG_PROMPT_CMD})%f')
+			;;
+		git)
+			if [[ -n $prompt_pure_vcs_info[branch] ]]; then
+				preprompt_parts+=("%F{$git_color}"'${prompt_pure_vcs_info[branch]}${prompt_pure_git_dirty}%f')
+			fi
+			# Git pull/push arrows.
+			if [[ -n $prompt_pure_git_arrows ]]; then
+				preprompt_parts+=('%F{cyan}${prompt_pure_git_arrows}%f')
+			fi
+			;;
+	esac
 
 	# Username and machine, if applicable.
 	[[ -n $prompt_pure_username ]] && preprompt_parts+=('$prompt_pure_username')
@@ -209,17 +217,18 @@ prompt_pure_async_vcs_info() {
 
 	# configure vcs_info inside async task, this frees up vcs_info
 	# to be used or configured as the user pleases.
-	zstyle ':vcs_info:*' enable git
+	zstyle ':vcs_info:*' enable git hg
 	zstyle ':vcs_info:*' use-simple true
-	# only export two msg variables from vcs_info
-	zstyle ':vcs_info:*' max-exports 2
-	# export branch (%b) and git toplevel (%R)
-	zstyle ':vcs_info:git*' formats '%b' '%R'
-	zstyle ':vcs_info:git*' actionformats '%b|%a' '%R'
+	# only export three msg variables from vcs_info
+	zstyle ':vcs_info:*' max-exports 3
+	# export branch (%b), toplevel (%R), and VCS in use (%s)
+	zstyle ':vcs_info:(git|hg):*' formats '%b' '%R' '%s'
+	zstyle ':vcs_info:(git|hg):*' actionformats '%b|%a' '%R' '%s'
 
 	vcs_info
 
 	local -A info
+	info[vcs]=$vcs_info_msg_2_
 	info[top]=$vcs_info_msg_1_
 	info[branch]=$vcs_info_msg_0_
 
@@ -243,6 +252,22 @@ prompt_pure_async_git_dirty() {
 	return $?
 }
 
+prompt_pure_async_hg_dirty() {
+	setopt localoptions noshwordsplit
+	local untracked_dirty=$1 dir=$2
+
+	# use cd -q to avoid side effects of changing directory, e.g. chpwd hooks
+	builtin cd -q $dir
+
+	if [[ $untracked_dirty = 0 ]]; then
+		test -z "$(command ${PURE_HG_COMMAND:chg} status -mard)"
+	else
+		test -z "$(command ${PURE_HG_COMMAND:chg} status)"
+	fi
+
+	return $?
+}
+
 prompt_pure_async_git_fetch() {
 	setopt localoptions noshwordsplit
 	# use cd -q to avoid side effects of changing directory, e.g. chpwd hooks
@@ -257,6 +282,17 @@ prompt_pure_async_git_fetch() {
 
 	# check arrow status after a successful git fetch
 	prompt_pure_async_git_arrows $1
+}
+
+prompt_pure_async_hg_incoming() {
+	setopt localoptions noshwordsplit
+	# use cd -q to avoid side effects of changing directory, e.g. chpwd hooks
+	builtin cd -q $1
+
+	# check if there any incoming changesets
+	test -z "$(command ${PURE_HG_COMMAND:chg} incoming -Tx -l1 -q)"
+
+	return $?
 }
 
 prompt_pure_async_git_arrows() {
@@ -287,6 +323,7 @@ prompt_pure_async_tasks() {
 		unset prompt_pure_git_last_dirty_check_timestamp
 		unset prompt_pure_git_arrows
 		unset prompt_pure_git_fetch_pattern
+		prompt_pure_vcs_info[vcs]=
 		prompt_pure_vcs_info[branch]=
 		prompt_pure_vcs_info[top]=
 	fi
@@ -301,18 +338,35 @@ prompt_pure_async_tasks() {
 }
 
 prompt_pure_async_refresh() {
+	typeset -gA prompt_pure_vcs_info
+
+	case $prompt_pure_vcs_info[vcs] in
+		hg)
+			prompt_pure_async_refresh_hg
+			;;
+		git)
+			prompt_pure_async_refresh_git
+			;;
+	esac
+}
+
+prompt_pure_async_refresh_hg() {
+
+}
+
+prompt_pure_async_refresh_git() {
 	setopt localoptions noshwordsplit
 
 	if [[ -z $prompt_pure_git_fetch_pattern ]]; then
 		# we set the pattern here to avoid redoing the pattern check until the
-		# working three has changed. pull and fetch are always valid patterns.
+		# working tree has changed. pull and fetch are always valid patterns.
 		typeset -g prompt_pure_git_fetch_pattern="pull|fetch"
 		async_job "prompt_pure" prompt_pure_async_git_aliases $working_tree
 	fi
 
 	async_job "prompt_pure" prompt_pure_async_git_arrows $PWD
 
-	# do not preform git fetch if it is disabled or working_tree == HOME
+	# do not perform git fetch if it is disabled or working_tree == HOME
 	if (( ${PURE_GIT_PULL:-1} )) && [[ $working_tree != $HOME ]]; then
 		# tell worker to do a git fetch
 		async_job "prompt_pure" prompt_pure_async_git_fetch $PWD
@@ -368,7 +422,8 @@ prompt_pure_async_callback() {
 			# git directory, run the async refresh tasks
 			[[ -n $info[top] ]] && [[ -z $prompt_pure_vcs_info[top] ]] && prompt_pure_async_refresh
 
-			# always update branch and toplevel
+			# always update branch, toplevel, vcs
+			prompt_pure_vcs_info[vcs]=$info[vcs]
 			prompt_pure_vcs_info[branch]=$info[branch]
 			prompt_pure_vcs_info[top]=$info[top]
 
